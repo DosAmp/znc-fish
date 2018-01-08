@@ -16,8 +16,8 @@ using std::map;
 
 #define REQUIRESSL	1
 
-#if (OPENSSL_VERSION_NUMBER < 0x0090800f)
-#error "We require openssl >= 0.9.8"
+#if (OPENSSL_VERSION_NUMBER < 0x1010000fL)
+#error "We require openssl >= 1.1"
 #endif
 
 /*
@@ -540,6 +540,8 @@ private:
 		DH *dh;
 		BIGNUM *b_prime=NULL;
 		BIGNUM *b_generator=NULL;
+		const BIGNUM *b_pub_key=NULL;
+		const BIGNUM *b_priv_key=NULL;
 
 		initb64();
 
@@ -553,23 +555,24 @@ private:
 		    return;
 		}
 
-		dh->p=b_prime;
-		dh->g=b_generator;
+		// DH is opaque in OpenSSL 1.1
+		DH_set0_pqg(dh, b_prime, NULL, b_generator);
 
 		if (!DH_generate_key(dh)) {
 		    return;
 		}
 
-		len = BN_num_bytes(dh->priv_key);
+		DH_get0_key(dh, &b_pub_key, &b_priv_key);
+		len = BN_num_bytes(b_priv_key);
 		a = (unsigned char *)malloc(len);
-		BN_bn2bin(dh->priv_key,a);
+		BN_bn2bin(b_priv_key,a);
 
 		memset(raw_buf, 0, 200);
 		htob64((char *)a, (char *)raw_buf, len);
 		sPriv_Key = CString((char *)raw_buf);
-		len=BN_num_bytes(dh->pub_key);
+		len=BN_num_bytes(b_pub_key);
 		b = (unsigned char *)malloc(len);
-		BN_bn2bin(dh->pub_key,b);
+		BN_bn2bin(b_pub_key,b);
 		memset(raw_buf, 0, 200);
 		htob64((char *)b, (char *)raw_buf, len);
 		sPub_Key = CString((char *)raw_buf);
@@ -587,6 +590,7 @@ private:
 		BIGNUM *b_myPrivkey=NULL;
 		BIGNUM *b_HisPubkey=NULL;
 		BIGNUM *b_generator=NULL;
+		BIGNUM *b_dummy;
 		DH *dh;
 		CString sSHA256digest;
 		unsigned char raw_buf[200];
@@ -600,13 +604,14 @@ private:
 		}
 
 		dh=DH_new();
-		dh->p=b_prime;
-		dh->g=b_generator;
+		DH_set0_pqg(dh, b_prime, NULL, b_generator);
 
 		memset(raw_buf, 0, 200);
 		len = b64toh((char *)sPriv_Key.c_str(), (char *)raw_buf);
 		b_myPrivkey=BN_bin2bn(raw_buf, len, NULL);
-		dh->priv_key=b_myPrivkey;
+		// hack: set dummy public key because DH_set0_key wants a public key in any case
+		b_dummy=BN_bin2bn((const unsigned char *)"\x01", 1, NULL);
+		DH_set0_key(dh, b_dummy, b_myPrivkey);
 
 		memset(raw_buf, 0, 200);
 		len = b64toh((char *)sOtherPub_Key.c_str(), (char *)raw_buf);
